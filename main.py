@@ -240,17 +240,21 @@ def analyze_frame(cap, params, frame_state):
                                                 threshold)
     timings['activate_solenoids'] = time.time() - t0
     
+    # FIXME : Too slow, optimize this section
     # create mask of the sprayed weed
     t0 = time.time()
     sprayed = funcs.get_sprayed_weed(NUMBER_OF_COLS, row_px_from_top, opened_closed, solenoid_active,
                                      spray_range, delta_movement, SPRAY_INTENSITY, spray_spacing)
     timings['spray_mask'] = time.time() - t0
 
+    # FIXME : Too slow, optimize this section
     # color the sprayed weed on the original frame
     t0 = time.time()
     for i in range(1, 256):
         frame[sprayed == i] = (0, 255-i, i)
     timings['color_spray'] = time.time() - t0
+    
+    
         
     ##################
     ##     stats    ##
@@ -333,19 +337,6 @@ def analyze_frame(cap, params, frame_state):
     # print("Total green: ", total_green)
     frame_state['global_total_red'] = np.add(total_red, frame_state['global_total_red'])
     frame_state['global_total_green'] = np.add(total_green, frame_state['global_total_green'])
-
-
-
-
-    # # FIXME : This part's taking too much time, need to optimize
-    # #save the sprayed frame for the next frame
-    # blank_canvas = np.zeros_like(frame)
-    # blank_canvas[opened_closed==255] = (0,255,0)
-    # for i in range(1, 256):
-    #     blank_canvas[sprayed == i] = (0, 255-i, i)
-    # # cv2.imshow("Sprayed", blank_canvas)
-    # analyze_frame.old_spray = blank_canvas
-
 
     # FIX : Optimized by using a lookup table    
     # Build a color lookup table once (outside analyze_frame)
