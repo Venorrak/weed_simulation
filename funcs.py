@@ -498,43 +498,22 @@ def get_sprayed_weed(cols: int, row_px: int, frame: np.array, solenoid_active: l
     final = np.zeros_like(frame)
     _record_step_time(get_sprayed_weed, "07_init_final_frame", t_step)
 
-    # Step 8: Render all sprays (broken into sub-steps for detailed analysis)
+    # Step 8: Render all sprays - SIMPLIFIED: draw points instead of circles
     t_step_render_start = time.time()
-    t_create_screens = 0
-    t_draw_circles = 0
-    t_mask_application = 0
-    t_compositing = 0
     
-    for center in spray_history:
-        # Sub-step 8a: Create black screen
+    if len(spray_history) > 0:
+        # Draw simple points/circles with fixed intensity
         t_sub = time.time()
-        black_screen = np.zeros_like(frame)
-        t_create_screens += time.time() - t_sub
+        for center in spray_history:
+            # Draw a single circle with spray_intensity (or use cv2.circle with radius 1-5 for visibility)
+            cv2.circle(final, tuple(center), spray_range // 2, spray_intensity, -1)  # -1 fills the circle
+        _record_step_time(get_sprayed_weed, "08a_draw_points", t_sub)
         
-        # Sub-step 8b: Draw circles
+        # Apply vegetation mask
         t_sub = time.time()
-        for r in range(spray_range):
-            intensity = spray_intensity - ((r * spray_intensity) / spray_range)
-            cv2.circle(black_screen, tuple(center), r, intensity, 2)
-        t_draw_circles += time.time() - t_sub
-
-        # Sub-step 8c: Calculate bounds and apply mask
-        t_sub = time.time()
-        min_x, max_x = max(0, int(center[0]) - spray_range), min(frame_width, int(center[0]) + spray_range)
-        min_y, max_y = max(0, int(center[1]) - spray_range), min(frame_height, int(center[1]) + spray_range)
-        black_screen[min_y:max_y, min_x:max_x][frame[min_y:max_y, min_x:max_x] == 0] = 0
-        t_mask_application += time.time() - t_sub
-
-        # Sub-step 8d: Composite onto final
-        t_sub = time.time()
-        cv2.addWeighted(final, 1, black_screen, 1, 0, final)
-        t_compositing += time.time() - t_sub
+        final[frame == 0] = 0
+        _record_step_time(get_sprayed_weed, "08b_mask_non_vegetation", t_sub)
     
-    # Record all render sub-steps
-    _record_step_time(get_sprayed_weed, "08a_create_screens", time.time() - t_create_screens)
-    _record_step_time(get_sprayed_weed, "08b_draw_circles", time.time() - t_draw_circles)
-    _record_step_time(get_sprayed_weed, "08c_mask_application", time.time() - t_mask_application)
-    _record_step_time(get_sprayed_weed, "08d_compositing", time.time() - t_compositing)
     _record_step_time(get_sprayed_weed, "08_render_sprays_total", t_step_render_start)
     
     # Update spray_history
