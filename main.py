@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import math
 import time
+import argparse
 
 import funcs
 import video
@@ -288,7 +289,12 @@ def main():
     global global_total_green
     global global_total_red
     
-    cap = cv2.VideoCapture("test_data/video1.mp4")
+    parser = argparse.ArgumentParser(description="Weed simulation video analyzer")
+    parser.add_argument("--video-path", type=str, default=None, help="Path to the video file to open")
+    args = parser.parse_args()
+
+    video_path = args.video_path if args.video_path else "test_data/video1.mp4"
+    cap = cv2.VideoCapture(video_path)
     source_fps = int(cap.get(cv2.CAP_PROP_FPS))
     if not (cap.isOpened()):
         cap.release()
