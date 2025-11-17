@@ -293,7 +293,34 @@ def main():
     parser.add_argument("--video-path", type=str, default=None, help="Path to the video file to open")
     args = parser.parse_args()
 
-    video_path = args.video_path if args.video_path else "test_data/video1.mp4"
+    import os
+    import json
+    config_path = os.path.join(os.path.dirname(__file__), "config.json")
+    # Load config if exists
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            config = json.load(f)
+    else:
+        config = {"last_video_path": None}
+
+    # Determine video path: CLI > config > default
+    if args.video_path:
+        video_path = args.video_path
+    elif config.get("last_video_path"):
+        video_path = config["last_video_path"]
+    else:
+        video_path = "test_data/video1.mp4"
+
+    if not os.path.exists(video_path):
+        print(f"Error: The video file '{video_path}' does not exist.")
+        print("Please provide a valid path with --video-path.")
+        return
+
+    # Save last used path to config
+    config["last_video_path"] = video_path
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
     cap = cv2.VideoCapture(video_path)
     source_fps = int(cap.get(cv2.CAP_PROP_FPS))
     if not (cap.isOpened()):
