@@ -6,6 +6,15 @@ from functools import wraps
 # Global timing storage
 _function_timings = {}
 
+def _record_step_time(func, step_name, start_time):
+    """Helper function to record timing for individual steps within a function."""
+    elapsed = time.time() - start_time
+    if not hasattr(func, "step_timings"):
+        func.step_timings = {}
+    if step_name not in func.step_timings:
+        func.step_timings[step_name] = []
+    func.step_timings[step_name].append(elapsed)
+
 def timed_function(func):
     """Decorator to measure function execution time."""
     @wraps(func)
@@ -59,10 +68,51 @@ def get_timing_report():
     
     return report
 
+def get_sprayed_weed_step_report():
+    """Generate a detailed timing report for steps within get_sprayed_weed."""
+    if not hasattr(get_sprayed_weed, "step_timings") or not get_sprayed_weed.step_timings:
+        return "No step timing data available for get_sprayed_weed."
+    
+    report = "\n" + "="*70 + "\n"
+    report += "GET_SPRAYED_WEED - DETAILED STEP TIMING\n"
+    report += "="*70 + "\n"
+    
+    step_timings = get_sprayed_weed.step_timings
+    total_all = 0
+    stats = []
+    
+    for step_name, times in step_timings.items():
+        count = len(times)
+        total = sum(times)
+        avg = total / count
+        min_t = min(times)
+        max_t = max(times)
+        
+        total_all += total
+        stats.append((step_name, count, avg, min_t, max_t, total))
+    
+    # Sort by step name (to show in order)
+    stats.sort(key=lambda x: x[0])
+    
+    for step_name, count, avg, min_t, max_t, total in stats:
+        percentage = (total / total_all * 100) if total_all > 0 else 0
+        report += f"\n{step_name}:\n"
+        report += f"  Calls: {count:6d}  |  Avg: {avg*1000:7.2f} ms  |  Min: {min_t*1000:6.2f} ms  |  Max: {max_t*1000:6.2f} ms\n"
+        report += f"  Total: {total*1000:7.2f} ms ({percentage:5.1f}%)\n"
+    
+    report += "-"*70 + "\n"
+    report += f"TOTAL STEP TIME: {total_all*1000:.2f} ms\n"
+    report += "="*70 + "\n"
+    
+    return report
+
 def reset_timing_data():
     """Reset all timing data."""
     global _function_timings
     _function_timings = {}
+    # Reset step timings for get_sprayed_weed if they exist
+    if hasattr(get_sprayed_weed, "step_timings"):
+        get_sprayed_weed.step_timings = {}
 
 @timed_function
 def rotate(frame: np.array, current_frame: int, source_fps: int, planning: list):
@@ -380,6 +430,9 @@ def old_get_sprayed_weed(cols:int, row_px: int, frame:np.array, solenoid_active:
 def get_sprayed_weed(cols: int, row_px: int, frame: np.array, solenoid_active: list[bool], spray_range: int, delta_movement: tuple[int, int], spray_intensity: int, spray_spacing: int) -> np.array:
     if not hasattr(get_sprayed_weed, "spray_history"):
         get_sprayed_weed.spray_history = []
+    if not hasattr(get_sprayed_weed, "step_timings"):
+        get_sprayed_weed.step_timings = {}
+    
     spray_history = get_sprayed_weed.spray_history
     
     """
@@ -394,52 +447,97 @@ def get_sprayed_weed(cols: int, row_px: int, frame: np.array, solenoid_active: l
     :param spray_spacing: The spacing between sprays
     :return: The mask of the sprays
     """
+    t_start = time.time()
+    
     frame_height, frame_width = frame.shape[:2]
     col_width = frame_width // cols
-
-    # Convert spray_history to a NumPy array for faster operations
+    
+    # Step 1: Initialize/convert spray_history
+    t_step = time.time()
     if spray_history:
         spray_history_np = np.array(spray_history)
+    else:
+        spray_history_np = np.empty((0, 2), int)
+    _record_step_time(get_sprayed_weed, "01_init_array", t_step)
 
-        # Delete centers that are too close to each other
+    # Step 2: Delete centers too close to each other
+    t_step = time.time()
+    if spray_history:
         dist = np.sqrt(np.sum((spray_history_np[:, np.newaxis] - spray_history_np[np.newaxis, :])**2, axis=-1))
         mask = np.triu(dist < spray_spacing, 1).any(axis=0)
         spray_history_np = spray_history_np[~mask]
+    _record_step_time(get_sprayed_weed, "02_remove_duplicates", t_step)
 
-        # Remove sprays out of bounds
+    # Step 3: Remove sprays out of bounds
+    t_step = time.time()
+    if spray_history:
         in_bounds_mask = (0 < spray_history_np[:, 0]) & (spray_history_np[:, 0] < frame_width) & (0 < spray_history_np[:, 1]) & (spray_history_np[:, 1] < frame_height)
         spray_history_np = spray_history_np[in_bounds_mask]
+    _record_step_time(get_sprayed_weed, "03_remove_out_of_bounds", t_step)
 
-        # Move the sprays
+    # Step 4: Move the sprays
+    t_step = time.time()
+    if spray_history:
         spray_history_np += delta_movement
+    _record_step_time(get_sprayed_weed, "04_move_sprays", t_step)
 
-    else:
-        spray_history_np = np.empty((0, 2), int)
-
-    # Add new sprays
+    # Step 5: Add new sprays
+    t_step = time.time()
     new_sprays = np.array([(int(col_width / 2 + (col_width * i)), int(row_px // 2)) for i in range(cols) if solenoid_active[i]])
     if new_sprays.size > 0:
         spray_history_np = np.vstack((spray_history_np, new_sprays))
+    _record_step_time(get_sprayed_weed, "05_add_new_sprays", t_step)
 
-    # Update spray_history with the modified array
+    # Step 6: Convert back to list
+    t_step = time.time()
     spray_history = spray_history_np.tolist()
+    _record_step_time(get_sprayed_weed, "06_convert_to_list", t_step)
 
-    # Prepare the final and black_screen frames
+    # Step 7: Initialize final frame
+    t_step = time.time()
     final = np.zeros_like(frame)
+    _record_step_time(get_sprayed_weed, "07_init_final_frame", t_step)
 
+    # Step 8: Render all sprays (broken into sub-steps for detailed analysis)
+    t_step_render_start = time.time()
+    t_create_screens = 0
+    t_draw_circles = 0
+    t_mask_application = 0
+    t_compositing = 0
+    
     for center in spray_history:
+        # Sub-step 8a: Create black screen
+        t_sub = time.time()
         black_screen = np.zeros_like(frame)
+        t_create_screens += time.time() - t_sub
+        
+        # Sub-step 8b: Draw circles
+        t_sub = time.time()
         for r in range(spray_range):
             intensity = spray_intensity - ((r * spray_intensity) / spray_range)
             cv2.circle(black_screen, tuple(center), r, intensity, 2)
+        t_draw_circles += time.time() - t_sub
 
+        # Sub-step 8c: Calculate bounds and apply mask
+        t_sub = time.time()
         min_x, max_x = max(0, int(center[0]) - spray_range), min(frame_width, int(center[0]) + spray_range)
         min_y, max_y = max(0, int(center[1]) - spray_range), min(frame_height, int(center[1]) + spray_range)
-
         black_screen[min_y:max_y, min_x:max_x][frame[min_y:max_y, min_x:max_x] == 0] = 0
+        t_mask_application += time.time() - t_sub
 
+        # Sub-step 8d: Composite onto final
+        t_sub = time.time()
         cv2.addWeighted(final, 1, black_screen, 1, 0, final)
+        t_compositing += time.time() - t_sub
     
+    # Record all render sub-steps
+    _record_step_time(get_sprayed_weed, "08a_create_screens", time.time() - t_create_screens)
+    _record_step_time(get_sprayed_weed, "08b_draw_circles", time.time() - t_draw_circles)
+    _record_step_time(get_sprayed_weed, "08c_mask_application", time.time() - t_mask_application)
+    _record_step_time(get_sprayed_weed, "08d_compositing", time.time() - t_compositing)
+    _record_step_time(get_sprayed_weed, "08_render_sprays_total", t_step_render_start)
+    
+    # Update spray_history
     get_sprayed_weed.spray_history = spray_history
 
     return final

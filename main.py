@@ -517,6 +517,8 @@ def main():
                 print_timing_summary(frame_state['timing_history'])
                 # Print funcs timing report
                 print(funcs.get_timing_report())
+                # Print detailed step timing for get_sprayed_weed
+                print(funcs.get_sprayed_weed_step_report())
             break
         
         # Press q to close the window
@@ -531,6 +533,8 @@ def main():
                 print_timing_summary(frame_state['timing_history'])
                 # Print funcs timing report
                 print(funcs.get_timing_report())
+                # Print detailed step timing for get_sprayed_weed
+                print(funcs.get_sprayed_weed_step_report())
             
             cap.release()
             video.close_video()
