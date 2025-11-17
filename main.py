@@ -253,6 +253,7 @@ def analyze_frame(cap, params, frame_state):
                                      spray_range, delta_movement, SPRAY_INTENSITY, spray_spacing)
     timings['spray_mask'] = time.time() - t0
 
+
     # FIX : Optimized by using a lookup table    
     t0 = time.time()
 
@@ -514,6 +515,8 @@ def main():
             if 'timing_history' in frame_state and frame_state['timing_history']:
                 print("\n" + "🔍 FINAL TIMING ANALYSIS " + "🔍")
                 print_timing_summary(frame_state['timing_history'])
+                # Print funcs timing report
+                print(funcs.get_timing_report())
             break
         
         # Press q to close the window
@@ -526,6 +529,8 @@ def main():
             if 'timing_history' in frame_state and frame_state['timing_history']:
                 print("\n" + "🔍 FINAL TIMING ANALYSIS " + "🔍")
                 print_timing_summary(frame_state['timing_history'])
+                # Print funcs timing report
+                print(funcs.get_timing_report())
             
             cap.release()
             video.close_video()

@@ -1,6 +1,70 @@
 import cv2
 import numpy as np
+import time
+from functools import wraps
 
+# Global timing storage
+_function_timings = {}
+
+def timed_function(func):
+    """Decorator to measure function execution time."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        elapsed = time.time() - start
+        
+        # Store timing
+        if func.__name__ not in _function_timings:
+            _function_timings[func.__name__] = []
+        _function_timings[func.__name__].append(elapsed)
+        
+        return result
+    return wrapper
+
+def get_timing_report():
+    """Generate a timing report for all timed functions."""
+    if not _function_timings:
+        return "No timing data available."
+    
+    report = "\n" + "="*70 + "\n"
+    report += "FUNCS.PY TIMING REPORT\n"
+    report += "="*70 + "\n"
+    
+    total_all = 0
+    stats = []
+    
+    for func_name, times in _function_timings.items():
+        count = len(times)
+        total = sum(times)
+        avg = total / count
+        min_t = min(times)
+        max_t = max(times)
+        
+        total_all += total
+        stats.append((func_name, count, avg, min_t, max_t, total))
+    
+    # Sort by total time (descending)
+    stats.sort(key=lambda x: x[5], reverse=True)
+    
+    for func_name, count, avg, min_t, max_t, total in stats:
+        percentage = (total / total_all * 100) if total_all > 0 else 0
+        report += f"\n{func_name}:\n"
+        report += f"  Calls: {count:6d}  |  Avg: {avg*1000:7.2f} ms  |  Min: {min_t*1000:6.2f} ms  |  Max: {max_t*1000:6.2f} ms\n"
+        report += f"  Total: {total*1000:7.2f} ms ({percentage:5.1f}%)\n"
+    
+    report += "-"*70 + "\n"
+    report += f"TOTAL TIME IN FUNCS: {total_all*1000:.2f} ms\n"
+    report += "="*70 + "\n"
+    
+    return report
+
+def reset_timing_data():
+    """Reset all timing data."""
+    global _function_timings
+    _function_timings = {}
+
+@timed_function
 def rotate(frame: np.array, current_frame: int, source_fps: int, planning: list):
     """
     rotate the frame according to the planning
@@ -26,6 +90,7 @@ def rotate(frame: np.array, current_frame: int, source_fps: int, planning: list)
             frame = frame
     return frame
 
+@timed_function
 def divide_frame(frame: np.array, cols: int, row_px: int) -> list[np.array]:
     """
     Divide a frame into rows*cols smaller frames
@@ -49,6 +114,7 @@ def divide_frame(frame: np.array, cols: int, row_px: int) -> list[np.array]:
 
     return divided_frames
 
+@timed_function
 def get_rgb_channels(img: np.array) -> tuple[np.array, np.array, np.array]:
     """
     Split an image into its channels and return them in RGB order
@@ -62,6 +128,7 @@ def get_rgb_channels(img: np.array) -> tuple[np.array, np.array, np.array]:
     # Return the channels in RGB order (Makes it easier to change channel order if the camera uses a different order)
     return red_channel, green_channel, blue_channel
 
+@timed_function
 def calcluate_exg(img) -> np.array:
     """
     Calculat ExG (Excess of Green) using the formula 2 * G - (R + B)
@@ -79,6 +146,7 @@ def calcluate_exg(img) -> np.array:
     # Normalize the image to 0-255
     return cv2.normalize(exg_img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)  # We use CV_8U to save space
 
+@timed_function
 def threshold(img: np.array) -> np.array:
     """
     Use Otsu's thresholding on an image
@@ -92,6 +160,7 @@ def threshold(img: np.array) -> np.array:
 
     return treated
 
+@timed_function
 def open_and_close_image(img: np.array) -> np.array:
     """
     Open and close an image to remove noise (when closing, dilate more to make blobs bigger)
@@ -104,6 +173,7 @@ def open_and_close_image(img: np.array) -> np.array:
 
     return img
 
+@timed_function
 def close_image(img: np.array) -> np.array:
     """
     Close an image to remove noise (dilate then erode) This will help us obtain blobs of vegetation
@@ -120,6 +190,7 @@ def close_image(img: np.array) -> np.array:
 
     return img
 
+@timed_function
 def open_image(img: np.array) -> np.array:
     """
     Open an image to remove noise (erode then dilate)
@@ -136,6 +207,7 @@ def open_image(img: np.array) -> np.array:
 
     return img
 
+@timed_function
 def detect_edges_canny(img: np.array) -> np.array:
     """
     Detect edges using Canny edge detection, Expecting a grayscale image
@@ -156,6 +228,7 @@ def declare_solenoid_active(cols: int) -> list[bool]:
     # Declare the solenoids as active
     return [False] * cols
 
+@timed_function
 def activate_solenoids(cols: int, row_px: int, frame: np.array, solenoid_active: list[bool], threshold: int) -> list[bool]:
     """
     Activate the solenoids if a column is more than % white
@@ -185,6 +258,7 @@ def activate_solenoids(cols: int, row_px: int, frame: np.array, solenoid_active:
                 solenoid_active[i // 2] = True
     return solenoid_active
 
+@timed_function
 def get_speed(solenoid_active: list[bool], max_speed: float, min_speed) -> float:
     """
     Get the speed the robot should move
@@ -203,6 +277,7 @@ def get_speed(solenoid_active: list[bool], max_speed: float, min_speed) -> float
     
     return speed
 
+@timed_function
 def printUI(frame: np.array, cols: int, row_px: int, solenoid_active: list[bool], fps: float, speed: float, current_frame : int = -1, font_scale : float = 1, font_thickness : int = 2) -> np.array:
     """
     Print the UI to the frame
@@ -300,6 +375,8 @@ def old_get_sprayed_weed(cols:int, row_px: int, frame:np.array, solenoid_active:
         cv2.addWeighted(final, 1, black_screen, 1, 0, final)
     return final
 
+# FIXME : This function is getting slower and slower as time goes on. Need to optimize spray history management.
+@timed_function
 def get_sprayed_weed(cols: int, row_px: int, frame: np.array, solenoid_active: list[bool], spray_range: int, delta_movement: tuple[int, int], spray_intensity: int, spray_spacing: int) -> np.array:
     if not hasattr(get_sprayed_weed, "spray_history"):
         get_sprayed_weed.spray_history = []
