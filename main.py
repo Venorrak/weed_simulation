@@ -98,6 +98,19 @@ def print_timing_summary(timing_history):
     print("="*60 + "\n")
 
 
+def print_final_reports(frame_state):
+    """Print efficiency and detailed timing reports (avoid duplication)."""
+    efficiency = funcs.calculate_efficiency(frame_state['global_total_green'], frame_state['global_total_red'])
+    print("Efficiency: ", efficiency, "%")
+    if 'timing_history' in frame_state and frame_state['timing_history']:
+        print("\n" + "🔍 FINAL TIMING ANALYSIS " + "🔍")
+        print_timing_summary(frame_state['timing_history'])
+        # Print funcs timing report
+        print(funcs.get_timing_report())
+        # Print detailed step timing for get_sprayed_weed
+        print(funcs.get_sprayed_weed_step_report())
+
+
 def analyze_frame(cap, params, frame_state):
     """
     Analyze a single frame from the video.
@@ -521,34 +534,14 @@ def main():
         except Exception as e:
             print(e)
             video.close_video()
-            # Calculate the efficiency
-            efficiency = funcs.calculate_efficiency(frame_state['global_total_green'], frame_state['global_total_red'])
-            print("Efficiency: ", efficiency, "%")
-            
-            # Print final timing summary
-            if 'timing_history' in frame_state and frame_state['timing_history']:
-                print("\n" + "🔍 FINAL TIMING ANALYSIS " + "🔍")
-                print_timing_summary(frame_state['timing_history'])
-                # Print funcs timing report
-                print(funcs.get_timing_report())
-                # Print detailed step timing for get_sprayed_weed
-                print(funcs.get_sprayed_weed_step_report())
+            # Print final reports (DRY refactor)
+            print_final_reports(frame_state)
             break
         
         # Press q to close the window
         if cv2.waitKey(1) & 0xFF == ord('q') or done:
-            # Calculate the efficiency
-            efficiency = funcs.calculate_efficiency(frame_state['global_total_green'], frame_state['global_total_red'])
-            print("Efficiency: ", efficiency, "%")
-            
-            # Print final timing summary
-            if 'timing_history' in frame_state and frame_state['timing_history']:
-                print("\n" + "🔍 FINAL TIMING ANALYSIS " + "🔍")
-                print_timing_summary(frame_state['timing_history'])
-                # Print funcs timing report
-                print(funcs.get_timing_report())
-                # Print detailed step timing for get_sprayed_weed
-                print(funcs.get_sprayed_weed_step_report())
+            # Print final reports (DRY refactor)
+            print_final_reports(frame_state)
             
             cap.release()
             video.close_video()
