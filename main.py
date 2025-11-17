@@ -70,6 +70,34 @@ PLANNING: list = [
     }
 ]
 
+def print_timing_summary(timing_history):
+    """Print average timing for each pipeline step."""
+    if not timing_history:
+        return
+    
+    # Calculate averages
+    avg_timings = {}
+    for key in timing_history[0].keys():
+        avg_timings[key] = sum(t[key] for t in timing_history) / len(timing_history)
+    
+    # Sort by time (slowest first)
+    sorted_timings = sorted(avg_timings.items(), key=lambda x: x[1], reverse=True)
+    
+    total_time = sum(avg_timings.values())
+    
+    print("\n" + "="*60)
+    print(f"TIMING ANALYSIS (avg over {len(timing_history)} frames)")
+    print("="*60)
+    for step, avg_time in sorted_timings:
+        percentage = (avg_time / total_time) * 100
+        ms_time = avg_time * 1000
+        print(f"  {step:20s}: {ms_time:6.2f} ms ({percentage:5.1f}%)")
+    print("-"*60)
+    print(f"  {'TOTAL':20s}: {total_time*1000:6.2f} ms (100.0%)")
+    print(f"  {'Effective FPS':20s}: {1/total_time:6.2f}")
+    print("="*60 + "\n")
+
+
 def analyze_frame(cap, params, frame_state):
     """
     Analyze a single frame from the video.
@@ -95,22 +123,33 @@ def analyze_frame(cap, params, frame_state):
     
     # Get the start time of current frame
     start_frame = time.time()
+    
+    # Initialize timing dictionary
+    timings = {}
+
+    # Initialize timing dictionary
+    timings = {}
 
     # declare array of false for solenoid sim
     solenoid_active = funcs.declare_solenoid_active(NUMBER_OF_COLS)
 
     # Get the frame from the video
+    t0 = time.time()
     ret, frame_original = cap.read()
+    timings['frame_read'] = time.time() - t0
 
     # Rotate the frame according to the planning
+    t0 = time.time()
     frame_state['current_frame'] += 1
     frame = funcs.rotate(frame_original, frame_state['current_frame'], source_fps, planning)
+    timings['frame_rotation'] = time.time() - t0
     
     ##################
     ## optical flow ##
     ##################
     
-    #calculate the optical flow
+    # Calculate the optical flow
+    t0 = time.time()
     frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     
     # calculate optical flow
@@ -130,7 +169,7 @@ def analyze_frame(cap, params, frame_state):
     # Calculate movements
     all_movements = a_b - c_d    
     
-    #remove vectors that are not in the same general direction
+    # Remove vectors that are not in the same general direction
     all_angles = []
     for i in range(len(all_movements)):
         if all_movements[i][0] == 0:
@@ -150,6 +189,7 @@ def analyze_frame(cap, params, frame_state):
     # Prepare next optical flow calculation
     analyze_frame.old_gray = frame_gray.copy() 
     analyze_frame.p0 = cv2.goodFeaturesToTrack(analyze_frame.old_gray, mask=None, **feature_params)
+    timings['optical_flow'] = time.time() - t0
     
     # Display the optical flow
     if (False): 
@@ -169,38 +209,55 @@ def analyze_frame(cap, params, frame_state):
     #########################
     
     # resize the frame
+    t0 = time.time()
     frame = cv2.resize(frame, (0, 0), fx=size_factor, fy=size_factor)
+    timings['frame_resize'] = time.time() - t0
 
     # get the excess of green 
+    t0 = time.time()
     exg = funcs.calcluate_exg(frame)
+    timings['excess_green'] = time.time() - t0
     
     # threshold the image
+    t0 = time.time()
     tresh = funcs.threshold(exg)
+    timings['threshold'] = time.time() - t0
 
     # open and close the image
+    t0 = time.time()
     opened_closed = funcs.open_and_close_image(tresh)
+    timings['morphology'] = time.time() - t0
 
     # color the detected green (weeds) on the original frame
+    t0 = time.time()
     frame[opened_closed==255] = (0,255,0)
+    timings['color_weeds'] = time.time() - t0
 
     # get the active solenoids and the speed the robot should move
+    t0 = time.time()
     solenoid_active = funcs.activate_solenoids(NUMBER_OF_COLS, row_px_from_top,
                                                 opened_closed, solenoid_active, 
                                                 threshold)
+    timings['activate_solenoids'] = time.time() - t0
     
     # create mask of the sprayed weed
+    t0 = time.time()
     sprayed = funcs.get_sprayed_weed(NUMBER_OF_COLS, row_px_from_top, opened_closed, solenoid_active,
                                      spray_range, delta_movement, SPRAY_INTENSITY, spray_spacing)
+    timings['spray_mask'] = time.time() - t0
 
-    #color the sprayed weed on the original frame
+    # color the sprayed weed on the original frame
+    t0 = time.time()
     for i in range(1, 256):
         frame[sprayed == i] = (0, 255-i, i)
+    timings['color_spray'] = time.time() - t0
         
     ##################
     ##     stats    ##
     ##################
     
-    #print("Delta movement: ", delta_movement)
+    t0 = time.time()
+    # print("Delta movement: ", delta_movement)
     last_sprayed_frame = analyze_frame.old_spray
     height, width, _ = last_sprayed_frame.shape
     
@@ -279,15 +336,18 @@ def analyze_frame(cap, params, frame_state):
     blank_canvas[opened_closed==255] = (0,255,0)
     for i in range(1, 256):
         blank_canvas[sprayed == i] = (0, 255-i, i)
-    #cv2.imshow("Sprayed", blank_canvas)
+    # cv2.imshow("Sprayed", blank_canvas)
     analyze_frame.old_spray = blank_canvas
+    timings['statistics'] = time.time() - t0
     
     ##################
     ##   end stats  ##
     ##################
 
     # get the speed of the robot
+    t0 = time.time()
     speed = funcs.get_speed(solenoid_active, MAX_SPEED, MIN_SPEED)
+    timings['get_speed'] = time.time() - t0
 
     # calculate the fps
     end_frame = time.time()
@@ -295,9 +355,20 @@ def analyze_frame(cap, params, frame_state):
     fps = 1 / delta_time_frame
 
     # print the UI on the frame
+    t0 = time.time()
     result = funcs.printUI(frame, NUMBER_OF_COLS, row_px_from_top,
                             solenoid_active, fps, speed, frame_state['current_frame'],
                             font_scale, 1)
+    timings['print_ui'] = time.time() - t0
+    
+    # Store timing info in frame_state for analysis
+    if 'timing_history' not in frame_state:
+        frame_state['timing_history'] = []
+    frame_state['timing_history'].append(timings)
+    
+    # Print timing summary every 30 frames
+    if frame_state['current_frame'] % 30 == 0:
+        print_timing_summary(frame_state['timing_history'][-30:])
     
 
     return result, speed
@@ -416,6 +487,11 @@ def main():
             # Calculate the efficiency
             efficiency = funcs.calculate_efficiency(frame_state['global_total_green'], frame_state['global_total_red'])
             print("Efficiency: ", efficiency, "%")
+            
+            # Print final timing summary
+            if 'timing_history' in frame_state and frame_state['timing_history']:
+                print("\n" + "🔍 FINAL TIMING ANALYSIS " + "🔍")
+                print_timing_summary(frame_state['timing_history'])
             break
         
         # Press q to close the window
@@ -423,6 +499,12 @@ def main():
             # Calculate the efficiency
             efficiency = funcs.calculate_efficiency(frame_state['global_total_green'], frame_state['global_total_red'])
             print("Efficiency: ", efficiency, "%")
+            
+            # Print final timing summary
+            if 'timing_history' in frame_state and frame_state['timing_history']:
+                print("\n" + "🔍 FINAL TIMING ANALYSIS " + "🔍")
+                print_timing_summary(frame_state['timing_history'])
+            
             cap.release()
             video.close_video()
             cv2.destroyAllWindows()
