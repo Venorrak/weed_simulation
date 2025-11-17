@@ -7,36 +7,45 @@ import argparse
 import funcs
 import video
 
-NUMBER_OF_COLS: int = 8 #number of solenoids
-MAX_SPEED: float = 2.5 #in km/s simaled
-MIN_SPEED: float = 0.5 #in km/s simaled
-OUTPUT_FPS: float = 20 #fps of the output video
-SPRAY_INTENSITY: int = 100 #intensity of the spray 0-255
+# Hardware constants (never change during runtime)
+NUMBER_OF_COLS: int = 8  # number of solenoids
+SPRAY_INTENSITY: int = 100  # intensity of the spray 0-255
 
-print("Do you want to use the default parameters? (y/n)")
-change_params = input()
-if change_params == "n":
-    print("Enter the solenoid activation threshold (0 - 100):")
-    THRESHOLD: int = int(input()) #in % of green in the column
-    print("Enter the minimum number of frames a frame will be displayed (x>=1)(dependent on speed):")
-    MIN_FPS: int = int(input()) #minimun number of frames per frame
-    print("Enter the maximum number of frames a frame will be displayed (dependent on speed):")
-    MAX_FPS: int = int(input()) #maximun number of frames per frame
-    print("Enter the factor to resize the frame (0-1 float):")
-    SIZE_FACTOR: float = float(input()) #factor to resize the frame
-    print("Enter the range of the spray in px (Default : 250):")
-    SPRAY_RANGE: int = int(int(input()) * SIZE_FACTOR)  #range of the spray in px
-else:
-    print("Default parameters will be used")
-    THRESHOLD : int = 1 #in % of green in the column
-    MIN_FPS: int = 1 #minimun number of frames per frame
-    MAX_FPS: int = 5 #maximun number of frames per frame
-    SIZE_FACTOR: float = 0.5 #factor to resize the frame
-    SPRAY_RANGE: int = int(300 * SIZE_FACTOR)  #range of the spray in px
+# Simulation constants
+MAX_SPEED: float = 2.5  # in km/h simulated
+MIN_SPEED: float = 0.5  # in km/h simulated
+OUTPUT_FPS: float = 20  # fps of the output video
+
+def get_parameters():
+    """Get simulation parameters from user or use defaults."""
+    print("Do you want to use the default parameters? (y/n)")
+    change_params = input()
     
-ROW_PX_FROM_TOP: int = int(200 * SIZE_FACTOR) #detection zone for solenoids
-FONT_SCALE = SIZE_FACTOR #scale of the font
-SPRAY_SPACING: int = int(40 * SIZE_FACTOR) #spacing between the spray
+    if change_params == "n":
+        print("Enter the solenoid activation threshold (0 - 100):")
+        threshold = int(input())
+        print("Enter the minimum number of frames a frame will be displayed (x>=1)(dependent on speed):")
+        min_fps = int(input())
+        print("Enter the maximum number of frames a frame will be displayed (dependent on speed):")
+        max_fps = int(input())
+        print("Enter the factor to resize the frame (0-1 float):")
+        size_factor = float(input())
+        print("Enter the range of the spray in px (Default : 250):")
+        spray_range = int(int(input()) * size_factor)
+    else:
+        print("Default parameters will be used")
+        threshold = 1
+        min_fps = 1
+        max_fps = 5
+        size_factor = 0.5
+        spray_range = int(300 * size_factor)
+    
+    # Calculate dependent parameters
+    row_px_from_top = int(200 * size_factor)
+    font_scale = size_factor
+    spray_spacing = int(40 * size_factor)
+    
+    return threshold, min_fps, max_fps, size_factor, spray_range, row_px_from_top, font_scale, spray_spacing
 
 # params for corner detection 
 FEATURE_PARAMS = dict( maxCorners = 100, 
@@ -61,19 +70,29 @@ PLANNING: list = [
     }
 ]
 
-source_fps: int = 10 #fps of the source video
-current_frame: int = 1
-old_gray: np.array = None
-p0 = None
-global global_total_red
-global global_total_green
-global_total_green = 0 #total green
-global_total_red = 0 #total red sprayed
-
-def analyze_frame(cap):
-    global global_total_red
-    global global_total_green
-    global current_frame
+def analyze_frame(cap, params, frame_state):
+    """
+    Analyze a single frame from the video.
+    
+    Args:
+        cap: Video capture object
+        params: Dictionary with simulation parameters
+        frame_state: Dictionary with mutable state (frame counters, totals, etc.)
+    
+    Returns:
+        tuple: (result_frame, speed)
+    """
+    # Extract parameters
+    size_factor = params['size_factor']
+    threshold = params['threshold']
+    spray_range = params['spray_range']
+    row_px_from_top = params['row_px_from_top']
+    font_scale = params['font_scale']
+    spray_spacing = params['spray_spacing']
+    source_fps = params['source_fps']
+    planning = params['planning']
+    feature_params = params['feature_params']
+    
     # Get the start time of current frame
     start_frame = time.time()
 
@@ -83,9 +102,9 @@ def analyze_frame(cap):
     # Get the frame from the video
     ret, frame_original = cap.read()
 
-    #rotate the frame according to the planning
-    current_frame += 1
-    frame = funcs.rotate(frame_original, current_frame, source_fps, PLANNING)
+    # Rotate the frame according to the planning
+    frame_state['current_frame'] += 1
+    frame = funcs.rotate(frame_original, frame_state['current_frame'], source_fps, planning)
     
     ##################
     ## optical flow ##
@@ -126,12 +145,11 @@ def analyze_frame(cap):
             np.delete(all_movements, i)
     
     # Calculate the average movement
-    delta_movement = (np.mean(all_movements, axis=0).astype(int) * SIZE_FACTOR).astype(int)
+    delta_movement = (np.mean(all_movements, axis=0).astype(int) * size_factor).astype(int)
     
-    #prepare next optical flow calculation
+    # Prepare next optical flow calculation
     analyze_frame.old_gray = frame_gray.copy() 
-    analyze_frame.p0 = cv2.goodFeaturesToTrack(analyze_frame.old_gray, mask = None, 
-                                    **FEATURE_PARAMS)
+    analyze_frame.p0 = cv2.goodFeaturesToTrack(analyze_frame.old_gray, mask=None, **feature_params)
     
     # Display the optical flow
     if (False): 
@@ -151,7 +169,7 @@ def analyze_frame(cap):
     #########################
     
     # resize the frame
-    frame = cv2.resize(frame, (0, 0), fx=SIZE_FACTOR, fy=SIZE_FACTOR)
+    frame = cv2.resize(frame, (0, 0), fx=size_factor, fy=size_factor)
 
     # get the excess of green 
     exg = funcs.calcluate_exg(frame)
@@ -166,13 +184,13 @@ def analyze_frame(cap):
     frame[opened_closed==255] = (0,255,0)
 
     # get the active solenoids and the speed the robot should move
-    solenoid_active = funcs.activate_solenoids(NUMBER_OF_COLS, ROW_PX_FROM_TOP,
+    solenoid_active = funcs.activate_solenoids(NUMBER_OF_COLS, row_px_from_top,
                                                 opened_closed, solenoid_active, 
-                                                THRESHOLD)
+                                                threshold)
     
-    #create mask of the sprayed weed
-    sprayed = funcs.get_sprayed_weed(NUMBER_OF_COLS, ROW_PX_FROM_TOP, opened_closed, solenoid_active,
-                                     SPRAY_RANGE, delta_movement, SPRAY_INTENSITY, SPRAY_SPACING)
+    # create mask of the sprayed weed
+    sprayed = funcs.get_sprayed_weed(NUMBER_OF_COLS, row_px_from_top, opened_closed, solenoid_active,
+                                     spray_range, delta_movement, SPRAY_INTENSITY, spray_spacing)
 
     #color the sprayed weed on the original frame
     for i in range(1, 256):
@@ -251,10 +269,10 @@ def analyze_frame(cap):
     # add the total red and green to the global total
     total_red = np.add(h_red, v_red)
     total_green = np.add(h_green, v_green)
-    #print("Total red: ", total_red)
-    #print("Total green: ", total_green)
-    global_total_red = np.add(total_red, global_total_red)
-    global_total_green = np.add(total_green, global_total_green)
+    # print("Total red: ", total_red)
+    # print("Total green: ", total_green)
+    frame_state['global_total_red'] = np.add(total_red, frame_state['global_total_red'])
+    frame_state['global_total_green'] = np.add(total_green, frame_state['global_total_green'])
     
     #save the sprayed frame for the next frame
     blank_canvas = np.zeros_like(frame)
@@ -277,26 +295,25 @@ def analyze_frame(cap):
     fps = 1 / delta_time_frame
 
     # print the UI on the frame
-    result = funcs.printUI(frame, NUMBER_OF_COLS, ROW_PX_FROM_TOP,
-                            solenoid_active, fps, speed, current_frame,
-                            FONT_SCALE, 1)
+    result = funcs.printUI(frame, NUMBER_OF_COLS, row_px_from_top,
+                            solenoid_active, fps, speed, frame_state['current_frame'],
+                            font_scale, 1)
     
 
     return result, speed
 
 def main():
-    global source_fps
-    global global_total_green
-    global global_total_red
-    
+    """Main entry point for the weed simulation."""
+    # Parse command line arguments
     parser = argparse.ArgumentParser(description="Weed simulation video analyzer")
     parser.add_argument("--video-path", type=str, default=None, help="Path to the video file to open")
     args = parser.parse_args()
 
     import os
     import json
+    
+    # Load or create config
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
-    # Load config if exists
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             config = json.load(f)
@@ -321,60 +338,90 @@ def main():
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
 
+    # Get simulation parameters from user
+    threshold, min_fps, max_fps, size_factor, spray_range, row_px_from_top, font_scale, spray_spacing = get_parameters()
+    
+    # Open video
     cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"Error: Could not open video device: {video_path}")
+        return
+        
     source_fps = int(cap.get(cv2.CAP_PROP_FPS))
-    if not (cap.isOpened()):
+    
+    # Create parameter dictionary
+    params = {
+        'size_factor': size_factor,
+        'threshold': threshold,
+        'spray_range': spray_range,
+        'row_px_from_top': row_px_from_top,
+        'font_scale': font_scale,
+        'spray_spacing': spray_spacing,
+        'source_fps': source_fps,
+        'min_fps': min_fps,
+        'max_fps': max_fps,
+        'planning': PLANNING,
+        'feature_params': FEATURE_PARAMS
+    }
+    
+    # Create frame state dictionary
+    frame_state = {
+        'current_frame': 1,
+        'global_total_red': 0,
+        'global_total_green': 0
+    }
+    
+    # Sample first frame to get the width and height for the output video
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) * size_factor)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) * size_factor)
+    video.open_video(width, height, OUTPUT_FPS)
+    
+    # Initialize the optical flow variables
+    ret, old_frame = cap.read()
+    if not ret:
+        print("Error: Could not read first frame")
         cap.release()
-        cv2.destroyAllWindows()
-        raise IOError("Could not open video device")
-    else:
-        # sample first frame to get the width and height for the output video
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) * SIZE_FACTOR)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) * SIZE_FACTOR)
-        video.open_video(width, height, OUTPUT_FPS)
+        return
         
-        #initialize the optical flow variables
-        ret, old_frame = cap.read()
-        analyze_frame.old_gray = cv2.cvtColor(old_frame, 
-                        cv2.COLOR_BGR2GRAY)
-        analyze_frame.old_gray = cv2.rotate(analyze_frame.old_gray, cv2.ROTATE_90_CLOCKWISE)
-        analyze_frame.p0 = cv2.goodFeaturesToTrack(analyze_frame.old_gray, mask = None, 
-                                    **FEATURE_PARAMS)
-        # initialize the old_spray with the first frame
-        sample_frame = old_frame.copy()
-        sample_frame = cv2.rotate(sample_frame, cv2.ROTATE_90_CLOCKWISE)
-        sample_frame = cv2.resize(sample_frame, (0, 0), fx=SIZE_FACTOR, fy=SIZE_FACTOR)
-        analyze_frame.old_spray = np.zeros_like(sample_frame)
-        
-        # analyze the first frame
-        if cap.isOpened():
-            result = analyze_frame(cap)
+    analyze_frame.old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
+    analyze_frame.old_gray = cv2.rotate(analyze_frame.old_gray, cv2.ROTATE_90_CLOCKWISE)
+    analyze_frame.p0 = cv2.goodFeaturesToTrack(analyze_frame.old_gray, mask=None, **FEATURE_PARAMS)
+    
+    # Initialize the old_spray with the first frame
+    sample_frame = old_frame.copy()
+    sample_frame = cv2.rotate(sample_frame, cv2.ROTATE_90_CLOCKWISE)
+    sample_frame = cv2.resize(sample_frame, (0, 0), fx=size_factor, fy=size_factor)
+    analyze_frame.old_spray = np.zeros_like(sample_frame)
+    
+    # Analyze the first frame
+    if cap.isOpened():
+        result = analyze_frame(cap, params, frame_state)
 
     done = False
     
     while cap.isOpened():
         try:
-            result, speed = analyze_frame(cap)
+            result, speed = analyze_frame(cap, params, frame_state)
             
             if not result.any():
                 done = True
             
-            # add the frame to the output video
-            video.write_frame(result, OUTPUT_FPS, speed, MAX_SPEED, MIN_SPEED, MAX_FPS, MIN_FPS)
+            # Add the frame to the output video
+            video.write_frame(result, OUTPUT_FPS, speed, MAX_SPEED, MIN_SPEED, max_fps, min_fps)
             cv2.imshow("Result", result)
             
         except Exception as e:
             print(e)
             video.close_video()
-            # calculate the efficiency
-            efficiency = funcs.calculate_efficiency(global_total_green, global_total_red)
+            # Calculate the efficiency
+            efficiency = funcs.calculate_efficiency(frame_state['global_total_green'], frame_state['global_total_red'])
             print("Efficiency: ", efficiency, "%")
             break
         
-        # press q to close the window
+        # Press q to close the window
         if cv2.waitKey(1) & 0xFF == ord('q') or done:
-            # calculate the efficiency
-            efficiency = funcs.calculate_efficiency(global_total_green, global_total_red)
+            # Calculate the efficiency
+            efficiency = funcs.calculate_efficiency(frame_state['global_total_green'], frame_state['global_total_red'])
             print("Efficiency: ", efficiency, "%")
             cap.release()
             video.close_video()
