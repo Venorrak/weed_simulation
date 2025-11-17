@@ -121,6 +121,12 @@ def analyze_frame(cap, params, frame_state):
     planning = params['planning']
     feature_params = params['feature_params']
     
+    if not hasattr(analyze_frame, "spray_lut"):
+        spray_lut = np.zeros((256, 3), dtype=np.uint8)
+        for i in range(1, 256):
+            spray_lut[i] = (0, 255 - i, i)
+        analyze_frame.spray_lut = spray_lut
+    
     # Get the start time of current frame
     start_frame = time.time()
     
@@ -247,13 +253,15 @@ def analyze_frame(cap, params, frame_state):
                                      spray_range, delta_movement, SPRAY_INTENSITY, spray_spacing)
     timings['spray_mask'] = time.time() - t0
 
-    # FIXME : Too slow, optimize this section
-    # color the sprayed weed on the original frame
+    # FIX : Optimized by using a lookup table    
     t0 = time.time()
-    for i in range(1, 256):
-        frame[sprayed == i] = (0, 255-i, i)
+
+    # Mask where spray exists
+    mask = sprayed > 0
+    # Apply LUT in one shot
+    frame[mask] = analyze_frame.spray_lut[sprayed[mask]]
+
     timings['color_spray'] = time.time() - t0
-    
     
         
     ##################
