@@ -185,16 +185,16 @@ def calcluate_exg(img) -> np.array:
     :param img: The image to calculate ExG on
     :return: The ExG image (grayscale)
     """
-
-    # Split the image into channels and convert to float to avoid overflow
-    # BEWARE of the order of the channels
-    blue_channel, green_channel, red_channel = cv2.split(np.array(img, dtype=np.float32))
-
-    # Calculate the excess of green
-    exg_img = 2 * green_channel - (red_channel + blue_channel)
-
-    # Normalize the image to 0-255
-    return cv2.normalize(exg_img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)  # We use CV_8U to save space
+    # Fast integer-based ExG computation without per-frame min/max normalization.
+    # Original range of 2*G - R - B is [-510, 510]. We shift by +510 to [0,1020] then scale by 1/4 -> [0,255].
+    # This preserves contrast for vegetation detection while avoiding expensive cv2.normalize.
+    b = img[:, :, 0].astype(np.int16)
+    g = img[:, :, 1].astype(np.int16)
+    r = img[:, :, 2].astype(np.int16)
+    exg = (2 * g - r - b + 510) >> 2  # divide by 4
+    # Clip in case of any rounding artifacts
+    exg = np.clip(exg, 0, 255).astype(np.uint8)
+    return exg
 
 @timed_function
 def threshold(img: np.array) -> np.array:

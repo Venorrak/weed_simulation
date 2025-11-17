@@ -133,9 +133,6 @@ def analyze_frame(cap, params, frame_state):
     # Initialize timing dictionary
     timings = {}
 
-    # Initialize timing dictionary
-    timings = {}
-
     # declare array of false for solenoid sim
     solenoid_active = funcs.declare_solenoid_active(NUMBER_OF_COLS)
 
@@ -153,71 +150,89 @@ def analyze_frame(cap, params, frame_state):
     ##################
     ## optical flow ##
     ##################
-    
-    # Calculate the optical flow
+    # Resize early (saves work for optical flow + later steps)
+    t0 = time.time()
+    frame = cv2.resize(frame, (0, 0), fx=size_factor, fy=size_factor)
+    timings['frame_resize'] = time.time() - t0
+
     t0 = time.time()
     frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    
-    # calculate optical flow
-    p1, status, err = cv2.calcOpticalFlowPyrLK(analyze_frame.old_gray, frame_gray, analyze_frame.p0, None)
-    
-    # Select good points 
-    good_new = p1[status == 1] 
-    good_old = analyze_frame.p0[status == 1]
-    
-    # Preallocate the array to avoid repeated allocation in the loop
-    all_movements = np.zeros((len(good_new), 2))
-        
-    # Using NumPy operations for vectorized computation
-    a_b = good_new.reshape(-1, 2)
-    c_d = good_old.reshape(-1, 2)
 
-    # Calculate movements
-    all_movements = a_b - c_d    
-    
-    # Remove vectors that are not in the same general direction
-    all_angles = []
-    for i in range(len(all_movements)):
-        if all_movements[i][0] == 0:
-            all_movements[i][0] = 0.0001
-        vector = [all_movements[i][0], all_movements[i][1]]
-        angle = np.arctan(vector[1] / vector[0])
-        degree = np.degrees(angle)
-        all_angles.append(degree)
-    median_angle = np.median(np.sort(all_angles))
-    for i in range(len(all_angles)):
-        if all_angles[i] > median_angle + 5 or all_angles[i] < median_angle - 5:
-            np.delete(all_movements, i)
-    
-    # Calculate the average movement
-    delta_movement = (np.mean(all_movements, axis=0).astype(int) * size_factor).astype(int)
-    
-    # Prepare next optical flow calculation
-    analyze_frame.old_gray = frame_gray.copy() 
-    analyze_frame.p0 = cv2.goodFeaturesToTrack(analyze_frame.old_gray, mask=None, **feature_params)
+    if not hasattr(analyze_frame, 'flow_initialized'):
+        # First-time initialization
+        analyze_frame.old_gray = frame_gray
+        init_params = feature_params.copy()
+        init_params['maxCorners'] = min(80, feature_params.get('maxCorners', 100))
+        analyze_frame.p0 = cv2.goodFeaturesToTrack(analyze_frame.old_gray, mask=None, **init_params)
+        analyze_frame.flow_frame_index = 0
+        analyze_frame.flow_refresh_interval = 5
+        analyze_frame.flow_initialized = True
+        delta_movement = np.array([0, 0], dtype=int)
+        movements = None
+    else:
+        if analyze_frame.p0 is None or len(analyze_frame.p0) == 0:
+            analyze_frame.p0 = cv2.goodFeaturesToTrack(analyze_frame.old_gray, mask=None, **feature_params)
+            delta_movement = np.array([0, 0], dtype=int)
+            movements = None
+        else:
+            p1, status, err = cv2.calcOpticalFlowPyrLK(analyze_frame.old_gray, frame_gray, analyze_frame.p0, None, **LK_PARAMS)
+            if p1 is None or status is None:
+                delta_movement = np.array([0, 0], dtype=int)
+                movements = None
+            else:
+                good_new = p1[status.flatten() == 1]
+                good_old = analyze_frame.p0[status.flatten() == 1]
+                if len(good_new) == 0:
+                    delta_movement = np.array([0, 0], dtype=int)
+                    movements = None
+                else:
+                    movements = (good_new - good_old)
+                    # Ensure movements is (N,2); cv2 often returns (N,1,2)
+                    if movements.ndim == 3 and movements.shape[1] == 1 and movements.shape[2] == 2:
+                        movements = movements[:,0,:]
+                    elif movements.ndim == 3 and movements.shape[-1] == 2:
+                        movements = movements.reshape(-1,2)
+                    elif movements.ndim == 2 and movements.shape[1] != 2:
+                        # Fallback: flatten pairs if possible
+                        try:
+                            movements = movements.reshape(-1,2)
+                        except Exception:
+                            delta_movement = np.array([0, 0], dtype=int)
+                            movements = None
+                    if movements is not None and movements.size >= 2:
+                        angles = np.degrees(np.arctan2(movements[:,1], movements[:,0] + 1e-6))
+                        median_angle = np.median(angles)
+                        mask_angles = np.abs(angles - median_angle) <= 5
+                        filtered = movements[mask_angles]
+                        if filtered.size == 0:
+                            filtered = movements
+                        delta_movement = np.round(filtered.mean(axis=0)).astype(int)
+                    else:
+                        delta_movement = np.array([0, 0], dtype=int)
+                        movements = None
+
+    # Refresh features periodically
+    if hasattr(analyze_frame, 'flow_frame_index'):
+        analyze_frame.flow_frame_index += 1
+        if analyze_frame.flow_frame_index % analyze_frame.flow_refresh_interval == 0:
+            analyze_frame.p0 = cv2.goodFeaturesToTrack(frame_gray, mask=None, **feature_params)
+
+    analyze_frame.old_gray = frame_gray
     timings['optical_flow'] = time.time() - t0
-    
-    # Display the optical flow
-    if (False): 
+
+    # Debug optical flow visualization (disabled by default)
+    if False and movements is not None:
         black_screen = np.zeros_like(frame)
-            
-        # Draw lines and circles on the black screen
-        for (a, b), (c, d) in zip(a_b, c_d):
-            a, b = int(a), int(b)
-            c, d = int(c), int(d)
-            cv2.line(black_screen, (a, b), (c, d), (255, 255, 255), 2)
-            cv2.circle(black_screen, (a, b), 2, 155, -1)
-            
+        for pt, mv in zip(good_old, movements):
+            a, b = pt.ravel().astype(int)
+            c, d = (pt + mv).ravel().astype(int)
+            cv2.line(black_screen, (a, b), (c, d), (255, 255, 255), 1)
+            cv2.circle(black_screen, (a, b), 2, (0,255,0), -1)
         cv2.imshow("Optical flow", black_screen)
 
     #########################
     ## end of optical flow ##
     #########################
-    
-    # resize the frame
-    t0 = time.time()
-    frame = cv2.resize(frame, (0, 0), fx=size_factor, fy=size_factor)
-    timings['frame_resize'] = time.time() - t0
 
     # get the excess of green 
     t0 = time.time()
@@ -246,7 +261,6 @@ def analyze_frame(cap, params, frame_state):
                                                 threshold)
     timings['activate_solenoids'] = time.time() - t0
     
-    # FIXME : Too slow, optimize this section
     # create mask of the sprayed weed
     t0 = time.time()
     sprayed = funcs.get_sprayed_weed(NUMBER_OF_COLS, row_px_from_top, opened_closed, solenoid_active,
