@@ -425,7 +425,6 @@ def old_get_sprayed_weed(cols:int, row_px: int, frame:np.array, solenoid_active:
         cv2.addWeighted(final, 1, black_screen, 1, 0, final)
     return final
 
-# FIXME : This function is getting slower and slower as time goes on. Need to optimize spray history management.
 @timed_function
 def get_sprayed_weed(cols: int, row_px: int, frame: np.array, solenoid_active: list[bool], spray_range: int, delta_movement: tuple[int, int], spray_intensity: int, spray_spacing: int) -> np.array:
     if not hasattr(get_sprayed_weed, "spray_history"):
