@@ -303,14 +303,16 @@ def analyze_frame(cap, params, frame_state):
         else:
             #print("Robot did not move vertically")
             v_part = None
+    
+    
         
     #get the total red and green in the parts
     if h_part is None:
         h_red = 0
         h_green = 0
     else:
-        #cv2.imshow("h_part", h_part)
-        cv2.waitKey(1)  # Add a delay of 1 millisecond to allow time for the frame to be displayed
+        # cv2.imshow("h_part", h_part)
+        # cv2.waitKey(1)  # Add a delay of 1 millisecond to allow time for the frame to be displayed
         h_red = np.sum(h_part[:, :, 2])
         h_green = np.sum(h_part[:, :, 1])
         
@@ -318,10 +320,11 @@ def analyze_frame(cap, params, frame_state):
         v_red = 0
         v_green = 0
     else:
-        #cv2.imshow("v_part", v_part)
-        cv2.waitKey(1)  # Add a delay of 1 millisecond to allow time for the frame to be displayed
+        # cv2.imshow("v_part", v_part)
+        # cv2.waitKey(1)  # Add a delay of 1 millisecond to allow time for the frame to be displayed
         v_red = np.sum(v_part[:, :, 2])
         v_green = np.sum(v_part[:, :, 1])
+    
     
     # add the total red and green to the global total
     total_red = np.add(h_red, v_red)
@@ -330,14 +333,34 @@ def analyze_frame(cap, params, frame_state):
     # print("Total green: ", total_green)
     frame_state['global_total_red'] = np.add(total_red, frame_state['global_total_red'])
     frame_state['global_total_green'] = np.add(total_green, frame_state['global_total_green'])
+
+
+
+
+    # # FIXME : This part's taking too much time, need to optimize
+    # #save the sprayed frame for the next frame
+    # blank_canvas = np.zeros_like(frame)
+    # blank_canvas[opened_closed==255] = (0,255,0)
+    # for i in range(1, 256):
+    #     blank_canvas[sprayed == i] = (0, 255-i, i)
+    # # cv2.imshow("Sprayed", blank_canvas)
+    # analyze_frame.old_spray = blank_canvas
+
+
+    # FIX : Optimized by using a lookup table    
+    # Build a color lookup table once (outside analyze_frame)
+    if not hasattr(analyze_frame, "spray_lut"):
+        spray_lut = np.zeros((256, 3), dtype=np.uint8)
+        for i in range(1, 256):
+            spray_lut[i] = (0, 255-i, i)
+        analyze_frame.spray_lut = spray_lut
+
+    # Now apply LUT in O(1) time
+    blank_canvas = analyze_frame.spray_lut[sprayed]
+    blank_canvas[opened_closed == 255] = (0,255,0)
     
-    #save the sprayed frame for the next frame
-    blank_canvas = np.zeros_like(frame)
-    blank_canvas[opened_closed==255] = (0,255,0)
-    for i in range(1, 256):
-        blank_canvas[sprayed == i] = (0, 255-i, i)
-    # cv2.imshow("Sprayed", blank_canvas)
-    analyze_frame.old_spray = blank_canvas
+    analyze_frame.old_spray = blank_canvas    
+    
     timings['statistics'] = time.time() - t0
     
     ##################
